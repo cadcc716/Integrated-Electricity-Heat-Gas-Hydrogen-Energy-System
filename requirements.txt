@@ -1,0 +1,4 @@
+gurobipy>=11
+numpy
+pandas
+matplotlib
