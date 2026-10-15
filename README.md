@@ -26,7 +26,7 @@
 |---|---|
 | `ies_model.py` | 完整模型：参数、建模、求解、第 5 节容量寻优（单设备搜索 + 多设备 PSO）、绘图 |
 | `reproduce.ipynb` | 运行全部结果并与论文逐项对比（已包含运行输出） |
-| `matlab/` | MATLAB + YALMIP 版本，与 Python 版是同一个模型，结果一致（见下文） |
+| `matlab/IES_reproduction.m` | MATLAB + YALMIP 单文件版本，与 Python 版是同一个模型，结果一致（见下文） |
 | `pic/` | 本项目结果图；`org_` 前缀为论文原图 |
 | `电热氢.pdf`、`电热氢——dual.pdf` | 论文原文及双语版 |
 
@@ -61,25 +61,19 @@ caps, cost, _ = M.pso_capacities({"GT": (0, 600), "EL": (0, 100), "MR": (0, 2000
 
 ### MATLAB 版本
 
-`matlab/` 目录是同一模型的 MATLAB 实现，用 YALMIP 建模（与论文作者相同），求解器可选 Gurobi、CPLEX 或 intlinprog。默认参数下三种储能口径、`literal` 口径和第 5 节各容量方案的结果都与 Python 版一致（第 4 节总成本均为 802,758.9 ¥）。
+`matlab/IES_reproduction.m` 是同一模型的 MATLAB 实现，单个文件包含全部内容：用户设置、数据与参数、约束与求解、结果输出、画图、第 5 节容量配置，函数定义放在文件末尾。用 YALMIP 建模（与论文作者相同），求解器可选 Gurobi、CPLEX 或 intlinprog。默认参数下三种储能口径、`literal` 口径和第 5 节各容量方案的结果都与 Python 版一致（第 4 节总成本均为 802,758.9 ¥）。
 
-| 文件 | 说明 |
-|---|---|
-| `main.m` | 主脚本：第 4 节调度、口径对比、第 5 节容量方案、PSO（默认关闭） |
-| `ies_params.m` | 参数；`ies_params('literal')` 为公式字面写法，`ies_params('PEL_max', 60.6)` 修改参数 |
-| `ies_solve.m` | 建模与求解，`ies_solve(p, mode, solver)` |
-| `ies_report.m` / `ies_plot.m` | 打印结果并与论文对比 / 绘制 Fig.4(a)–(f) |
-| `ies_capacity_cost.m` / `ies_section5.m` / `ies_pso.m` | 第 5 节：给定容量的总成本、Table 4/6 对比、六设备 PSO |
+使用方法：安装 YALMIP 并加入路径，打开 `IES_reproduction.m`，在“第 0 段 用户设置”中选择求解器后直接运行。
 
 ```matlab
-addpath('matlab');           % 另需安装 YALMIP 并加入路径
-p = ies_params();
-res = ies_solve(p, 'paper', 'gurobi');
-ies_report(res);
-ies_plot(res, 'pic_matlab');
+addpath(genpath('D:\YALMIP'));   % 改成你的 YALMIP 目录
+run('IES_reproduction.m')
 ```
 
-YALMIP 每次求解都要重新建模，比 Python 版慢得多（在 Octave + GLPK 下实测单次约 7 秒）。PSO（30 个粒子、60 代）需要求解约 1,800 次，建议先调小粒子数和代数试跑。
+- 结果图默认保存到 `pic_matlab/`。
+- 修改参数：`p = ies_params('PEL_max', 60.6);`，按论文公式字面实现：`p = ies_params('literal');`。
+- 六设备 PSO（第 7 段）默认关闭，需要求解约 1,800 次，YALMIP 每次求解都要重新建模，耗时远长于 Python 版，建议先调小粒子数和代数试跑。
+- 不要用 `sdpsettings` 设置 `gurobi.*` 参数：只要改动其中任何一项，YALMIP 会把整套默认参数传给 Gurobi，新版 Gurobi 会因 `TuneTimeLimit = -1` 报错（error 10008）。
 
 ---
 
