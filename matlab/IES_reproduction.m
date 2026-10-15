@@ -17,7 +17,10 @@
 %    第 5 段  不同口径对比
 %    第 6 段  第 5 节：论文 Table 4/6 容量方案                  → 函数 ies_section5
 %    第 7 段  第 5 节：六设备容量 PSO 寻优（默认关闭）          → 函数 ies_pso
+%    第 8 段  论文其余全部数据图：Fig.2、3、5、7、8、9、10、11   → 函数 plot_fig*
 %    文件末尾  全部函数定义
+%
+%  论文 Fig.1（系统结构图）和 Fig.6（容量寻优流程图）是示意图，不是数据图，未包含。
 %
 %  默认参数复现论文报告的结果，与论文公式字面写法不同的三处（依据见 README）：
 %    1. 储能首末条件按作者实际实现（S_n(1) = 0，第 1 时段的强制充电不计入库存）
@@ -34,6 +37,16 @@ plot_dir = 'pic_matlab';% 结果图保存目录；设为 '' 则只显示不保�
 run_compare  = true;    % 第 5 段：不同口径对比
 run_section5 = true;    % 第 6 段：论文 Table 4/6 容量方案
 run_pso      = false;   % 第 7 段：六设备 PSO（需求解约 1,800 次，耗时较长）
+run_figures  = true;    % 第 8 段：论文其余全部数据图
+run_fig5     = true;    %   Fig.5 容量扫描：6 台设备 × 每台 800/sweep_step+1 次求解，最耗时
+sweep_step   = 25;      %   Fig.5 容量扫描步长（论文横轴 0–800）
+h2_prices    = 0:20:500;%   Fig.10 氢价扫描（¥/kg），前后各求解一次
+n_nonopt     = 20;      %   Fig.11 非最优调度工况数
+
+% 优化后的设备容量：默认取论文 Table 6（PSO 结果），用于 Fig.7、9、10、11；
+% 若运行第 7 段 PSO，则改用本程序算出的最优容量
+opt_caps = struct('PGT_max', 162.8317, 'PEL_max', 65.5134, 'HMR_max', 1127.2, ...
+                  'HHFC_max', 0, 'PGB_max', 0, 'PWHB_max', 87.9743);
 
 if isempty(which('sdpvar'))
     error('未找到 YALMIP：请先下载 YALMIP 并用 addpath(genpath(''YALMIP 所在目录'')) 加入路径');
@@ -52,7 +65,7 @@ end
 ies_report(res);
 
 %% 4. 画图（论文 Fig.4(a)–(f)）
-ies_plot(res, plot_dir);
+ies_plot(res, plot_dir, 'fig4');
 
 %% 5. 不同口径对比
 if run_compare
@@ -82,6 +95,22 @@ if run_pso
     fprintf('PSO 最低总成本：%.1f（论文 Table 6：446106.7）\n', best_cost);
     res_opt = ies_solve(ies_params_with(p, best), es_mode, solver);
     ies_report(res_opt);
+    opt_caps = best;
+end
+
+%% 8. 论文其余全部数据图
+if run_figures
+    res_opt = ies_solve(ies_params_with(p, opt_caps), es_mode, solver);
+    if ~res_opt.ok, error('优化容量下求解失败：%s', res_opt.info); end
+    plot_fig2_fig3(p, plot_dir);                                    % Fig.2 风光出力、Fig.3 负荷
+    if run_fig5
+        plot_fig5(p, es_mode, solver, 0:sweep_step:800, plot_dir);  % Fig.5 容量–成本曲线
+    end
+    ies_plot(res_opt, plot_dir, 'fig7');                            % Fig.7 优化容量下的调度
+    plot_fig8(res, plot_dir);                                       % Fig.8 优化前风光利用
+    plot_fig9(res_opt, plot_dir);                                   % Fig.9 优化后能量损失
+    plot_fig10(p, opt_caps, es_mode, solver, h2_prices, plot_dir);  % Fig.10 氢价–总成本
+    plot_fig11(p, res, res_opt.total, es_mode, solver, n_nonopt, plot_dir);  % Fig.11 成本对比
 end
 
 %% =====================================================================
@@ -453,41 +482,43 @@ end
 %% ---------------------------------------------------------------------
 %  画图
 %  ---------------------------------------------------------------------
-function ies_plot(res, outdir)
-% IES_PLOT  电/热/气/氢平衡与碳捕集/封存共 6 张图（对应论文 Fig.4(a)–(f)）
+function ies_plot(res, outdir, prefix)
+% IES_PLOT  电/热/气/氢平衡与碳捕集/封存共 6 张图
+%   基准容量下对应论文 Fig.4(a)–(f)，优化容量下对应 Fig.7(a)–(f)
 %
-%   ies_plot(res)            在屏幕上显示
-%   ies_plot(res, 'pic')     同时把 PNG 保存到 pic/ 目录
+%   ies_plot(res)                  在屏幕上显示
+%   ies_plot(res, 'pic', 'fig4')   同时保存为 pic/fig4a_elec_balance.png 等
 
 if nargin < 2, outdir = ''; end
+if nargin < 3, prefix = 'fig4'; end
 if ~isempty(outdir) && ~exist(outdir, 'dir'), mkdir(outdir); end
 ts = res.ts;
-f = @(name) fullfile_or_empty(outdir, name);
+f = @(name) fullfile_or_empty(outdir, [prefix, name]);
 
 balance_fig(ts.t, ...
     {'外部购电', '风机出力', '光伏出力', '燃气轮机', '氢燃料电池', '蓄电池放电'}, ...
     [ts.E_Buy, ts.WT, ts.PV, ts.GT_e, ts.HFC_e, ts.ES_dis(:, 1)], ...
     {'电解槽耗电', '蓄电池充电', '碳捕集耗电'}, [ts.EL_e, ts.ES_cha(:, 1), ts.CCS_e], ...
-    ts.E_Load, '电负荷能量平衡图', 'Power/MW', f('elec_balance.png'));
+    ts.E_Load, '(a) 电负荷能量平衡图', 'Power/MW', f('a_elec_balance.png'));
 balance_fig(ts.t, ...
     {'外部购热', '余热锅炉', '燃气锅炉', '氢燃料电池热', '蓄热放热'}, ...
     [ts.H_Buy, ts.WHB_h, ts.GB_h, ts.HFC_h, ts.ES_dis(:, 2)], ...
     {'蓄热储热'}, ts.ES_cha(:, 2), ...
-    ts.H_Load, '热负荷能量平衡图', 'Power/MW', f('heat_balance.png'));
+    ts.H_Load, '(b) 热负荷能量平衡图', 'Power/MW', f('b_heat_balance.png'));
 balance_fig(ts.t, ...
     {'外部购气', '甲烷发生器', '储气放气'}, [ts.G_Buy, ts.MR_g, ts.ES_dis(:, 3)], ...
     {'储气充气', '燃气轮机耗气', '燃气锅炉耗气'}, [ts.ES_cha(:, 3), ts.GT_g, ts.GB_g], ...
-    ts.G_Load, '天然气平衡分析图', 'Power/MW', f('gas_balance.png'));
+    ts.G_Load, '(c) 天然气平衡分析图', 'Power/MW', f('c_gas_balance.png'));
 balance_fig(ts.t, ...
     {'外部购氢', '电解槽制氢', '储氢放氢'}, [ts.H2_Buy, ts.EL_H2, ts.ES_dis(:, 4)], ...
     {'储氢充氢', '燃料电池耗氢', '甲烷发生器耗氢'}, [ts.ES_cha(:, 4), ts.HFC_H2, ts.MR_H2], ...
-    ts.H2_Load, '氢能平衡分析图', 'Mass/kg', f('hydrogen_balance.png'));
+    ts.H2_Load, '(d) 氢能平衡分析图', 'Mass/kg', f('d_hydrogen_balance.png'));
 balance_fig(ts.t, {'CCS', 'Non-CCS'}, [ts.CO2_cap, ts.CO2_uncap], ...
     {'GT', 'GB'}, [ts.CO2_GT, ts.CO2_GB], ...
-    [], 'Carbon Capture Status', 'Mass/t', f('carbon_cap.png'));
+    [], '(e) Carbon Capture Status', 'Mass/t', f('e_carbon_cap.png'));
 balance_fig(ts.t, {'Carbon Capture'}, ts.CO2_cap, ...
     {'Carbon Storage', 'MR'}, [ts.CO2_CS, ts.CO2_MR], ...
-    [], 'Carbon Storage Status', 'Mass/t', f('carbon_storage.png'));
+    [], '(f) Carbon Storage Status', 'Mass/t', f('f_carbon_storage.png'));
 end
 
 function fpath = fullfile_or_empty(outdir, name)
@@ -647,4 +678,179 @@ for it = 1:o.iters
 end
 best = cell2struct(num2cell(gbest), names, 2);
 best_cost = gcost;
+end
+
+%% ---------------------------------------------------------------------
+%  论文其余数据图：Fig.2、3、5、8、9、10、11（Fig.4、7 见 ies_plot）
+%  ---------------------------------------------------------------------
+function save_png(fig, outdir, name)
+% 保存图片；outdir 为空时只显示
+if isempty(outdir), return; end
+if ~exist(outdir, 'dir'), mkdir(outdir); end
+print(fig, fullfile(outdir, name), '-dpng', '-r150');
+end
+
+function plot_fig2_fig3(p, outdir)
+% Fig.2 风电/光伏可用出力；Fig.3 电、热、气、氢负荷
+h = 1:p.T;    % 论文横轴为 1–24 h
+fig = figure('Color', 'w', 'Position', [100, 100, 560, 420]);
+plot(h, p.WT_avail, '-s', 'Color', [0.25, 0.25, 0.25], 'MarkerFaceColor', [0.25, 0.25, 0.25], 'LineWidth', 1.2);
+hold on;
+plot(h, p.PV_avail, '-o', 'Color', [0.93, 0.11, 0.14], 'MarkerFaceColor', [0.93, 0.11, 0.14], 'LineWidth', 1.2);
+hold off; box on; xlim([0, 25]);
+xlabel('Time (hour)'); ylabel('Power (MW)'); title('Fig.2 WT and PV output');
+legend({'WT', 'PV'}, 'Location', 'northwest');
+save_png(fig, outdir, 'fig2_wt_pv_output.png');
+
+fig = figure('Color', 'w', 'Position', [100, 100, 980, 420]);
+subplot(1, 2, 1);
+plot(h, p.load_e, '-o', 'LineWidth', 1.2); hold on;
+plot(h, p.load_h, '-s', 'LineWidth', 1.2);
+plot(h, p.load_g, '-^', 'LineWidth', 1.2); hold off;
+box on; xlim([0, 25]);
+xlabel('Time (hour)'); ylabel('Power (MW)'); title('Fig.3(a) 电、热、气负荷');
+legend({'电负荷', '热负荷', '天然气负荷'}, 'Location', 'northwest');
+subplot(1, 2, 2);
+plot(h, p.load_H, '-d', 'Color', [0.47, 0.67, 0.19], 'LineWidth', 1.2);
+box on; xlim([0, 25]);
+xlabel('Time (hour)'); ylabel('Mass (kg)'); title('Fig.3(b) 氢负荷');
+save_png(fig, outdir, 'fig3_load_profiles.png');
+end
+
+function plot_fig5(p, mode, solver, xs, outdir)
+% Fig.5 单一设备容量变化时，最优调度下的总运行成本（标出最低点）
+devs  = {'PGT_max', 'PEL_max', 'HMR_max', 'HHFC_max', 'PGB_max', 'PWHB_max'};
+names = {'GT (MW)', 'EL (MW)', 'MR (kg)', 'HFC (kg)', 'GB (MW)', 'WHB (MW)'};
+tags  = 'abcdef';
+fig = figure('Color', 'w', 'Position', [100, 100, 900, 1000]);
+for d = 1:numel(devs)
+    cost = zeros(size(xs));
+    for k = 1:numel(xs)
+        cost(k) = ies_capacity_cost(struct(devs{d}, xs(k)), p, mode, solver);
+    end
+    fprintf('  Fig.5(%s) %s 扫描完成\n', tags(d), names{d});
+    [cmin, i] = min(cost);
+    subplot(3, 2, d);
+    plot(xs, cost / 1e4, 'k-', 'LineWidth', 1.2); hold on;
+    plot([xs(1), xs(i), xs(i)], [cmin, cmin, min(cost)] / 1e4, ':', 'Color', [0.5, 0.5, 0.5]);
+    plot(xs(i), cmin / 1e4, 'o', 'Color', [0.93, 0.11, 0.14], 'MarkerFaceColor', [0.93, 0.11, 0.14]);
+    text(xs(i), cmin / 1e4, sprintf('  (%g, %.2f)', xs(i), cmin), 'VerticalAlignment', 'bottom', 'FontSize', 8);
+    hold off; box on;
+    xlabel(names{d}); ylabel('Cost (10^4 ¥)');
+    title(sprintf('(%s)', tags(d)));
+end
+save_png(fig, outdir, 'fig5_capacity_sweep.png');
+end
+
+function plot_fig8(res, outdir)
+% Fig.8 优化前（基准容量）风光可用出力与实际利用出力
+ts = res.ts;  h = (1:numel(ts.t))';
+fig = figure('Color', 'w', 'Position', [100, 100, 560, 420]);
+cm = [0.85, 0.0, 0.75];  cw = [0.0, 0.7, 0.9];
+plot(h, ts.PV + ts.PV_cut, '-', 'Color', cm, 'LineWidth', 1.5); hold on;
+plot(h, ts.WT + ts.WT_cut, '-', 'Color', cw, 'LineWidth', 1.5);
+plot(h, ts.PV, '--', 'Color', cm, 'LineWidth', 1.5);
+plot(h, ts.WT, '--', 'Color', cw, 'LineWidth', 1.5);
+hold off; box on; xlim([0, 25]);
+xlabel('Time (hour)'); ylabel('Power (MW)');
+title(sprintf('Fig.8 优化前风光利用（弃风弃光 %.1f MWh）', max(0, sum(ts.WT_cut + ts.PV_cut))));
+legend({'PV output', 'WT output', 'Utilized PV power', 'Utilized WT power'}, 'Location', 'northwest');
+save_png(fig, outdir, 'fig8_wt_pv_utilization.png');
+end
+
+function plot_fig9(res, outdir)
+% Fig.9 优化容量下各设备的能量损失（MJ，1 MWh = 3600 MJ）
+%   CHP：GT 耗气 − 发电 − 余热锅炉回收热；WHB：(1 − η_WHB)·GT 产热
+%   EL ：(1 − η_EL)·耗电；                MR ：(1 − η_MR)·耗氢 × 热值
+p = res.p;  ts = res.ts;  h = (1:numel(ts.t))';
+gt_h = ts.GT_e * (1 - p.eta_GT - p.eta_loss) / p.eta_GT;
+loss = 3600 * [ts.GT_g - ts.GT_e - ts.WHB_h, ...
+               (1 - p.eta_WHB) * gt_h, ...
+               (1 - p.eta_EL) * ts.EL_e, ...
+               (1 - p.eta_MR) * ts.MR_H2 * p.meh];
+fig = figure('Color', 'w', 'Position', [100, 100, 560, 420]);
+colors = [0.25, 0.25, 0.25; 1, 0.15, 0.15; 0.1, 0.35, 0.95; 0.0, 0.6, 0.35];
+hold on;
+for k = 1:4
+    plot(h, loss(:, k), '-', 'Color', colors(k, :), 'LineWidth', 1.5);
+end
+hold off; box on; xlim([0, 25]);
+xlabel('Time (hour)'); ylabel('Energy loss (MJ)'); title('Fig.9 优化后系统的能量损失');
+legend({'CHP', 'WHB', 'EL', 'MR'}, 'Location', 'northeast');
+save_png(fig, outdir, 'fig9_energy_loss.png');
+end
+
+function plot_fig10(p, opt_caps, mode, solver, prices, outdir)
+% Fig.10 氢气价格（¥/kg）与系统总成本的关系，容量优化前后各一条曲线
+before = zeros(size(prices));  after = zeros(size(prices));
+for k = 1:numel(prices)
+    q = p;  q.price_H2 = prices(k) / p.meh;          % ¥/kg → ¥/MWh
+    before(k) = ies_capacity_cost(struct(), q, mode, solver);
+    after(k)  = ies_capacity_cost(opt_caps, q, mode, solver);
+end
+fig = figure('Color', 'w', 'Position', [100, 100, 560, 420]);
+plot(prices, before / 1e4, 'k-', 'LineWidth', 1.5); hold on;
+plot(prices, after / 1e4, 'r-', 'LineWidth', 1.5); hold off;
+box on;
+xlabel('Hydrogen price (¥/kg)'); ylabel('Cost (10^4 ¥)');
+title(sprintf('Fig.10 氢价与总成本（基准氢价 %.1f ¥/kg）', p.price_H2 * p.meh));
+legend({'Before optimization', 'After optimization'}, 'Location', 'northwest');
+save_png(fig, outdir, 'fig10_hydrogen_price.png');
+end
+
+function plot_fig11(p, res, opt_total, mode, solver, n, outdir)
+% Fig.11 非最优调度、最优调度、最优容量下最优调度的总成本对比
+%   论文没有说明 20 个非最优工况如何生成。这里的做法是：随机扰动电价、气价、热价、氢价和
+%   碳价（±30%）后求解调度，再按真实价格计算这套调度的总成本，即“按不准确的价格预测
+%   做出的调度”。这样得到的调度都满足全部约束，成本一定不低于最优调度。
+rand('twister', 1);    %#ok<RAND>
+cost = zeros(1, n);
+for k = 1:n
+    q = p;
+    q.price_elec = p.price_elec .* (1 + 0.3 * (2 * rand(p.T, 1) - 1));
+    q.price_gas  = p.price_gas  * (1 + 0.3 * (2 * rand - 1));
+    q.price_heat = p.price_heat * (1 + 0.3 * (2 * rand - 1));
+    q.price_H2   = p.price_H2   * (1 + 0.3 * (2 * rand - 1));
+    q.lam        = p.lam        * (1 + 0.3 * (2 * rand - 1));
+    r = ies_solve(q, mode, solver);
+    cost(k) = ies_eval_cost(p, r.ts);
+end
+fig = figure('Color', 'w', 'Position', [100, 100, 560, 420]);
+plot(1:n, cost / 1e4, 'k-s', 'MarkerFaceColor', 'k', 'MarkerSize', 4, 'LineWidth', 1.2); hold on;
+plot([1, n], [res.total, res.total] / 1e4, 'r-', 'LineWidth', 1.5);
+plot([1, n], [opt_total, opt_total] / 1e4, 'b-', 'LineWidth', 1.5);
+hold off; box on; xlim([0, n]);
+ylim([floor(opt_total / 1e5) * 10 - 5, ceil(max(cost) / 1e5) * 10 + 30]);   % 上方留出图例位置
+xlabel('Operating conditions'); ylabel('Cost (10^4 ¥)'); title('Fig.11 总成本对比');
+legend({'Non-optimal resource scheduling', 'Optimal resource scheduling', ...
+        'Optimal resource scheduling under optimal capacities'}, 'Location', 'north');
+save_png(fig, outdir, 'fig11_cost_comparison.png');
+end
+
+function [total, costs] = ies_eval_cost(p, ts)
+% IES_EVAL_COST  按参数 p 计算一套给定调度结果 ts 的总成本（与 ies_solve 的目标函数一致）
+dt = p.dt;
+hfc_P = p.eta_HFC * ts.HFC_H2 * p.meh;
+if strcmp(p.om_basis, 'capacity')
+    om_conv = p.a_GT * p.PGT_max + p.a_GB * p.PGB_max + p.a_WHB * p.PWHB_max ...
+            + p.a_EL * p.PEL_max + p.a_MR * p.HMR_max + p.a_HFC * p.HHFC_max;
+else
+    om_conv = dt * sum(p.a_GT * ts.GT_e + p.a_GB * ts.GB_h + p.a_WHB * ts.WHB_h ...
+                       + p.a_EL * ts.EL_e + p.a_MR * ts.MR_g + p.a_HFC * hfc_P);
+end
+costs.COP = om_conv + dt * (sum(p.a_CCS * ts.CCS_e + p.a_WT * ts.WT + p.a_PV * ts.PV) ...
+                            + sum((ts.ES_cha + ts.ES_dis) * p.ES.alpha'));
+costs.CEP = dt * sum(p.price_elec .* ts.E_Buy + p.price_heat * ts.H_Buy + p.price_gas * ts.G_Buy ...
+                     + p.price_H2 * p.meh * ts.H2_Buy);
+costs.CWS = dt * sum(p.pen_WT * ts.WT_cut + p.pen_PV * ts.PV_cut);
+costs.CCS = sum(p.k_cs * ts.CO2_CS);
+E = sum(ts.CO2_env - (p.k_buy * ts.E_Buy + p.k_GT * ts.GT_g + p.k_GB * ts.GB_g));
+if E < 0
+    costs.CCT = p.sell_factor * p.lam * E;
+else
+    k = 0:4;
+    costs.CCT = max(p.lam * (1 + k * p.alpha_step) .* (E - k * p.l_step) ...
+                    + p.lam * p.l_step * (k + p.alpha_step * k .* (k - 1) / 2));
+end
+total = costs.COP + costs.CCT + costs.CEP + costs.CWS + costs.CCS;
 end

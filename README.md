@@ -70,7 +70,21 @@ addpath(genpath('D:\YALMIP'));   % 改成你的 YALMIP 目录
 run('IES_reproduction.m')
 ```
 
-- 结果图默认保存到 `pic_matlab/`。
+- 结果图默认保存到 `pic_matlab/`，包含论文全部数据图：
+
+  | 论文图 | 内容 | 文件 |
+  |---|---|---|
+  | Fig.2 | 风电、光伏可用出力 | `fig2_wt_pv_output.png` |
+  | Fig.3 | 电、热、气、氢负荷 | `fig3_load_profiles.png` |
+  | Fig.4(a)–(f) | 基准容量下的电/热/气/氢平衡、碳捕集、碳封存 | `fig4a_…` ~ `fig4f_…` |
+  | Fig.5(a)–(f) | 六台设备容量与总成本的关系 | `fig5_capacity_sweep.png` |
+  | Fig.7(a)–(f) | 优化容量（论文 Table 6）下的调度 | `fig7a_…` ~ `fig7f_…` |
+  | Fig.8 | 优化前风光可用与实际利用出力 | `fig8_wt_pv_utilization.png` |
+  | Fig.9 | 优化后 CHP、WHB、EL、MR 的能量损失 | `fig9_energy_loss.png` |
+  | Fig.10 | 氢价与总成本，容量优化前后对比 | `fig10_hydrogen_price.png` |
+  | Fig.11 | 非最优调度、最优调度、最优容量下最优调度的成本对比 | `fig11_cost_comparison.png` |
+
+  Fig.1（系统结构图）和 Fig.6（寻优流程图）是示意图，不属于数据图，未包含。Fig.11 的 20 个非最优工况论文未说明生成方法，这里用随机扰动价格（±30%）求得的调度、再按真实价格计算成本来构造。Fig.5 需要求解约 200 次，可在“第 0 段”中调大 `sweep_step` 或关闭 `run_fig5`。
 - 修改参数：`p = ies_params('PEL_max', 60.6);`，按论文公式字面实现：`p = ies_params('literal');`。
 - 六设备 PSO（第 7 段）默认关闭，需要求解约 1,800 次，YALMIP 每次求解都要重新建模，耗时远长于 Python 版，建议先调小粒子数和代数试跑。
 - 不要用 `sdpsettings` 设置 `gurobi.*` 参数：只要改动其中任何一项，YALMIP 会把整套默认参数传给 Gurobi，新版 Gurobi 会因 `TuneTimeLimit = -1` 报错（error 10008）。
