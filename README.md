@@ -26,6 +26,7 @@
 |---|---|
 | `ies_model.py` | 完整模型：参数、建模、求解、第 5 节容量寻优（单设备搜索 + 多设备 PSO）、绘图 |
 | `reproduce.ipynb` | 运行全部结果并与论文逐项对比（已包含运行输出） |
+| `matlab/` | MATLAB + YALMIP 版本，与 Python 版是同一个模型，结果一致（见下文） |
 | `pic/` | 本项目结果图；`org_` 前缀为论文原图 |
 | `电热氢.pdf`、`电热氢——dual.pdf` | 论文原文及双语版 |
 
@@ -57,6 +58,28 @@ caps, cost, _ = M.pso_capacities({"GT": (0, 600), "EL": (0, 100), "MR": (0, 2000
                                   "HFC": (0, 50), "GB": (0, 200), "WHB": (0, 200)},
                                  n_particles=30, iters=60)   # 论文 Table 6
 ```
+
+### MATLAB 版本
+
+`matlab/` 目录是同一模型的 MATLAB 实现，用 YALMIP 建模（与论文作者相同），求解器可选 Gurobi、CPLEX 或 intlinprog。默认参数下三种储能口径、`literal` 口径和第 5 节各容量方案的结果都与 Python 版一致（第 4 节总成本均为 802,758.9 ¥）。
+
+| 文件 | 说明 |
+|---|---|
+| `main.m` | 主脚本：第 4 节调度、口径对比、第 5 节容量方案、PSO（默认关闭） |
+| `ies_params.m` | 参数；`ies_params('literal')` 为公式字面写法，`ies_params('PEL_max', 60.6)` 修改参数 |
+| `ies_solve.m` | 建模与求解，`ies_solve(p, mode, solver)` |
+| `ies_report.m` / `ies_plot.m` | 打印结果并与论文对比 / 绘制 Fig.4(a)–(f) |
+| `ies_capacity_cost.m` / `ies_section5.m` / `ies_pso.m` | 第 5 节：给定容量的总成本、Table 4/6 对比、六设备 PSO |
+
+```matlab
+addpath('matlab');           % 另需安装 YALMIP 并加入路径
+p = ies_params();
+res = ies_solve(p, 'paper', 'gurobi');
+ies_report(res);
+ies_plot(res, 'pic_matlab');
+```
+
+YALMIP 每次求解都要重新建模，比 Python 版慢得多（在 Octave + GLPK 下实测单次约 7 秒）。PSO（30 个粒子、60 代）需要求解约 1,800 次，建议先调小粒子数和代数试跑。
 
 ---
 
